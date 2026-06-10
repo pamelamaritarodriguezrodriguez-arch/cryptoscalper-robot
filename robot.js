@@ -315,6 +315,10 @@ const loadState = ()=>{ try{return JSON.parse(fs.readFileSync("state.json","utf8
 const saveState = st=>{ try{fs.writeFileSync("state.json",JSON.stringify(st));}catch(e){console.log("state fail",e.message);} };
 
 async function main(){
+  if(process.env.TEST==="true"){
+    await tg("✅ <b>Robot CryptoScalper conectado</b>\n📡 Mensaje de prueba — si lees esto, Telegram funciona y te llegarán las señales.\n⏰ "+TD());
+    console.log("📨 Mensaje de prueba enviado a Telegram.");
+  }
   console.log(`🔎 Escaneando ${PAIRS.length} pares · estricto=${S.strict} · ${TD()}`);
   const raw={};
   await Promise.all(PAIRS.map(async p=>{ raw[p.s]={};
