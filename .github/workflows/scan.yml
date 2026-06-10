@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"     # cada ~10 min (GitHub puede demorar algo, es normal)
   workflow_dispatch:            # permite ejecutarlo a mano con un botón
+    inputs:
+      test:
+        description: "Enviar mensaje de prueba a Telegram"
+        type: boolean
+        default: false
 
 permissions:
   contents: write               # para guardar el estado y no repetir alertas
@@ -26,6 +31,7 @@ jobs:
           CHAT_ID:   ${{ secrets.CHAT_ID }}
           SYMBOLS:   ${{ vars.SYMBOLS }}
           STRICT:    ${{ vars.STRICT }}
+          TEST:      ${{ github.event.inputs.test }}
         run: node robot.js
       - name: Guardar estado
         run: |
