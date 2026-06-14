@@ -92,18 +92,18 @@ function analyzeEntry(pr,hi,lo){
   if(pe10<=pe55&&le10>le55&&lS>0){signal="LONG";reason=["Cruce EMA 10>55","Cambio de tendencia ↑"];quality=6;if(lA>20)reason.push("ADX confirma");}
   if(pe10>=pe55&&le10<le55&&lS<0){signal="SHORT";reason=["Cruce EMA 10<55","Cambio de tendencia ↓"];quality=6;if(lA>20)reason.push("ADX confirma");}
 
-  // ── PATTERN 4: Divergence at extreme (counter-trend entry) ──
-  if(n>16){
-    const pL1=Math.min(...pr.slice(-16,-8)),pL2=Math.min(...pr.slice(-8));
-    const rL1=Math.min(...rs.slice(-16,-8)),rL2=Math.min(...rs.slice(-8));
-    if(pL2<pL1&&rL2>rL1&&lR<35&&absDistE55<nearZone*1.5){
-      signal="LONG";reason=["Divergencia alcista","Precio nuevo mínimo + RSI sube"];quality=7;
-    }
-    const pH1=Math.max(...pr.slice(-16,-8)),pH2=Math.max(...pr.slice(-8));
-    const rH1=Math.max(...rs.slice(-16,-8)),rH2=Math.max(...rs.slice(-8));
-    if(pH2>pH1&&rH2<rH1&&lR>65&&absDistE55<nearZone*1.5){
-      signal="SHORT";reason=["Divergencia bajista","Precio nuevo máximo + RSI baja"];quality=7;
-    }
+  // ── PATTERN 4: Divergencia método TradingLatino — anclada en valles/picos del SQUEEZE MOMENTUM ──
+  if(n>40&&absDistE55<nearZone*1.5){
+    const piv=(arr,lo)=>{const out=[];for(let i=arr.length-3;i>=Math.max(2,arr.length-45);i--){const v=arr[i];let ok=true;for(let j=1;j<=2;j++){if(lo?(arr[i-j]<v||arr[i+j]<v):(arr[i-j]>v||arr[i+j]>v)){ok=false;break;}}if(ok&&(out.length===0||out[out.length-1]-i>=4)){out.push(i);if(out.length>=2)break;}}return out;};
+    const sV=piv(sq.v,true),sP=piv(sq.v,false);
+    if(sV.length>=2&&(sV[0]-sV[1])>=4){const b=sV[0],a=sV[1];
+      if(sq.v[b]>sq.v[a]&&pr[b]<pr[a]&&lR<58){const rC=rs[b]>rs[a],tag="Divergencia alcista (Squeeze"+(rC?"+RSI":"")+")";
+        if(!signal){signal="LONG";reason=[tag,"Valles del momentum suben, precio baja"];quality=7;}
+        else if(signal==="LONG"){reason.push(tag);quality=Math.min(8,quality+1);}}}
+    if(sP.length>=2&&(sP[0]-sP[1])>=4){const b=sP[0],a=sP[1];
+      if(sq.v[b]<sq.v[a]&&pr[b]>pr[a]&&lR>42){const rC=rs[b]<rs[a],tag="Divergencia bajista (Squeeze"+(rC?"+RSI":"")+")";
+        if(!signal){signal="SHORT";reason=[tag,"Picos del momentum bajan, precio sube"];quality=7;}
+        else if(signal==="SHORT"){reason.push(tag);quality=Math.min(8,quality+1);}}}
   }
 
   // ── PATTERN 5: Squeeze fire after lateralization near EMA55 ──
