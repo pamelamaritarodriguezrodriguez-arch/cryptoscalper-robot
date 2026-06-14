@@ -6,6 +6,10 @@
 // ════════════════════════════════════════════════════════════
 const fs = require('fs');
 const F   = (n,d=2)=>n==null?"—":Number(n).toFixed(d);
+// Formato de precio según magnitud (para monedas baratas como DOGE/PEPE)
+const FP  = n=>{ if(n==null||isNaN(n))return "—"; const a=Math.abs(n);
+  const d = a>=1000?2 : a>=1?3 : a>=0.1?4 : a>=0.01?5 : a>=0.001?6 : 8;
+  return Number(n).toFixed(d); };
 const Pct = (a,b)=>b===0?0:((a-b)/b)*100;
 const T   = ()=>new Date().toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const TD  = ()=>new Date().toLocaleDateString("es",{day:"2-digit",month:"short"})+" "+T();
@@ -282,7 +286,7 @@ function checkLayers(raw,pair,sym,btc){
 }
 
 // ═══ BINANCE / TG / SOUND ═══
-function tgFmt(e){return`${e.type==="LONG"?"🟢 COMPRAR":"🔴 VENDER"}\n\n💎 <b>${e.pair}</b>\n🎯 Pullback a EMA55 · Dist: ${e.distE55}%\n📊 Calidad: ${e.quality}\n✅ ${e.confirms.join("\n✅ ")}\n${e.dailyTrend==="ALCISTA"?"📈":"📉"} Diario: ${e.dailyTrend} · Riesgo: ${e.dailyRisk}${e.btcDir?`\n₿ BTC guía: ${e.btcDir==="ALC"?"ALCISTA ✅":e.btcDir==="BAJ"?"BAJISTA ⚠️":"MIXTO"}`:""}${e.sweep||e.ob?`\n🎯 ${e.sweep&&e.ob?"Barrido + Order Block":e.sweep?"Barrido de liquidez":"Order Block"} en 5m`:""}\n━━━━━━━━━━━━━━\n💰 Entrada: <code>${F(e.entry)}</code>\n🛑 SL: <code>${F(e.sl)}</code>\n🎯 TP1: <code>${F(e.tp1)}</code>\n🎯 TP2: <code>${F(e.tp2)}</code>\n🎯 TP3: <code>${F(e.tp3)}</code>\nR:R 1:${e.rr}${e.warnings.length?"\n\n"+e.warnings.join("\n"):""}\n⏰ ${TD()}`;}
+function tgFmt(e){return`${e.type==="LONG"?"🟢 COMPRAR":"🔴 VENDER"}\n\n💎 <b>${e.pair}</b>\n🎯 Pullback a EMA55 · Dist: ${e.distE55}%\n📊 Calidad: ${e.quality}\n✅ ${e.confirms.join("\n✅ ")}\n${e.dailyTrend==="ALCISTA"?"📈":"📉"} Diario: ${e.dailyTrend} · Riesgo: ${e.dailyRisk}${e.btcDir?`\n₿ BTC guía: ${e.btcDir==="ALC"?"ALCISTA ✅":e.btcDir==="BAJ"?"BAJISTA ⚠️":"MIXTO"}`:""}${e.sweep||e.ob?`\n🎯 ${e.sweep&&e.ob?"Barrido + Order Block":e.sweep?"Barrido de liquidez":"Order Block"} en 5m`:""}\n━━━━━━━━━━━━━━\n💰 Entrada: <code>${FP(e.entry)}</code>\n🛑 SL: <code>${FP(e.sl)}</code>\n🎯 TP1: <code>${FP(e.tp1)}</code>\n🎯 TP2: <code>${FP(e.tp2)}</code>\n🎯 TP3: <code>${FP(e.tp3)}</code>\nR:R 1:${e.rr}${e.warnings.length?"\n\n"+e.warnings.join("\n"):""}\n⏰ ${TD()}`;}
 
 // ════════════════════════════════════════════════════════════
 //  PARTE SERVIDOR (Binance + Telegram + estado)
