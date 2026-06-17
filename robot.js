@@ -43,6 +43,15 @@ function analyzeEntry(pr,hi,lo){
   // "NEAR" = within 1.5% of EMA55 (adjustable by ATR)
   const nearZone=Math.min(2.5,Math.max(1.2,(lAt/le55)*100*1.5)); // zona dinámica por ATR, TOPE 2.5% para exigir cercanía real a EMA55
 
+  // ═══ CONFIRMACIÓN JAIME: el precio AGUANTA en la EMA + medias estrechándose ═══
+  // Medias estrechándose: EMA10 y EMA55 convergen (Jaime: pasa antes del cambio de tendencia)
+  const gapNow=Math.abs(le10-le55)/le55, gapPast=Math.abs(e10[n-6]-e55[n-6])/e55[n-6];
+  const emasNarrowing=gapNow<gapPast*0.97;
+  // AGUANTE LONG: llegó a la EMA55 y NO cae (lateraliza) — mínimos recientes no rompen la zona y no hace mínimo nuevo
+  const holdsLong=((Math.min(...lo.slice(-3))-le55)/le55)*100 > -nearZone && last>=Math.min(prev,prev2);
+  // AGUANTE SHORT: llegó a la EMA55 y NO sube — máximos recientes no rompen la zona y no hace máximo nuevo
+  const holdsShort=((Math.max(...hi.slice(-3))-le55)/le55)*100 < nearZone && last<=Math.max(prev,prev2);
+
   let signal=null,reason=[],quality=0;
 
   // ── PATTERN 1: Pullback to EMA 55 in uptrend (THE main entry) ──
@@ -59,7 +68,7 @@ function analyzeEntry(pr,hi,lo){
     if(lR<55&&lR>30)q+=1; // RSI not overbought
     if(lM>pM)q+=1; // MACD improving
     if(wSq&&!iSq&&lS>0)q+=2; // Squeeze breakout up
-    if(q>=4){signal="LONG";reason.push("Rebote en EMA55");quality=q;
+    if(q>=4&&holdsLong){signal="LONG";reason.push("Rebote en EMA55");quality=q;reason.push("Aguanta en EMA55 (no cae)");if(emasNarrowing){reason.push("Medias estrechándose");quality=Math.min(9,quality+1);}
       if(bouncing)reason.push("Vela de rebote ↑");
       if(sqzUp)reason.push("Momentum ↑");
       if(adxOk)reason.push("ADX "+F(lA,0));
@@ -80,7 +89,7 @@ function analyzeEntry(pr,hi,lo){
     if(lR>45&&lR<70)q+=1;
     if(lM<pM)q+=1;
     if(wSq&&!iSq&&lS<0)q+=2;
-    if(q>=4){signal="SHORT";reason.push("Rechazo en EMA55");quality=q;
+    if(q>=4&&holdsShort){signal="SHORT";reason.push("Rechazo en EMA55");quality=q;reason.push("Aguanta en EMA55 (no sube)");if(emasNarrowing){reason.push("Medias estrechándose");quality=Math.min(9,quality+1);}
       if(rejecting)reason.push("Vela de rechazo ↓");
       if(sqzDn)reason.push("Momentum ↓");
       if(adxOk)reason.push("ADX "+F(lA,0));
@@ -92,18 +101,11 @@ function analyzeEntry(pr,hi,lo){
   if(pe10<=pe55&&le10>le55&&lS>0){signal="LONG";reason=["Cruce EMA 10>55","Cambio de tendencia ↑"];quality=6;if(lA>20)reason.push("ADX confirma");}
   if(pe10>=pe55&&le10<le55&&lS<0){signal="SHORT";reason=["Cruce EMA 10<55","Cambio de tendencia ↓"];quality=6;if(lA>20)reason.push("ADX confirma");}
 
-  // ── PATTERN 4: Divergencia método TradingLatino — anclada en valles/picos del SQUEEZE MOMENTUM ──
-  if(n>40&&absDistE55<nearZone*1.5){
+  // ── PATTERN 4: Divergencia (Squeeze, método TradingLatino) SOLO como confluencia — NUNCA abre operación sola ──
+  if(n>40&&absDistE55<nearZone*1.5&&signal){
     const piv=(arr,lo)=>{const out=[];for(let i=arr.length-3;i>=Math.max(2,arr.length-45);i--){const v=arr[i];let ok=true;for(let j=1;j<=2;j++){if(lo?(arr[i-j]<v||arr[i+j]<v):(arr[i-j]>v||arr[i+j]>v)){ok=false;break;}}if(ok&&(out.length===0||out[out.length-1]-i>=4)){out.push(i);if(out.length>=2)break;}}return out;};
-    const sV=piv(sq.v,true),sP=piv(sq.v,false);
-    if(sV.length>=2&&(sV[0]-sV[1])>=4){const b=sV[0],a=sV[1];
-      if(sq.v[b]>sq.v[a]&&pr[b]<pr[a]&&lR<58){const rC=rs[b]>rs[a],tag="Divergencia alcista (Squeeze"+(rC?"+RSI":"")+")";
-        if(!signal){signal="LONG";reason=[tag,"Valles del momentum suben, precio baja"];quality=7;}
-        else if(signal==="LONG"){reason.push(tag);quality=Math.min(8,quality+1);}}}
-    if(sP.length>=2&&(sP[0]-sP[1])>=4){const b=sP[0],a=sP[1];
-      if(sq.v[b]<sq.v[a]&&pr[b]>pr[a]&&lR>42){const rC=rs[b]<rs[a],tag="Divergencia bajista (Squeeze"+(rC?"+RSI":"")+")";
-        if(!signal){signal="SHORT";reason=[tag,"Picos del momentum bajan, precio sube"];quality=7;}
-        else if(signal==="SHORT"){reason.push(tag);quality=Math.min(8,quality+1);}}}
+    if(signal==="LONG"){const sV=piv(sq.v,true);if(sV.length>=2){const b=sV[0],a=sV[1];if(sq.v[b]>sq.v[a]&&pr[b]<pr[a]){reason.push("Divergencia alcista (Squeeze"+(rs[b]>rs[a]?"+RSI":"")+")");quality=Math.min(8,quality+1);}}}
+    if(signal==="SHORT"){const sP=piv(sq.v,false);if(sP.length>=2){const b=sP[0],a=sP[1];if(sq.v[b]<sq.v[a]&&pr[b]>pr[a]){reason.push("Divergencia bajista (Squeeze"+(rs[b]<rs[a]?"+RSI":"")+")");quality=Math.min(8,quality+1);}}}
   }
 
   // ── PATTERN 5: Squeeze fire after lateralization near EMA55 ──
@@ -112,11 +114,24 @@ function analyzeEntry(pr,hi,lo){
     if(lS<0&&!signal){signal="SHORT";reason=["Squeeze breakout ↓","Lateralización + explosión"];quality=5;}
   }
 
+  // ═══ ZONAS NO OPERABLES (Jaime): máximo anterior / doble-triple techo / resistencia muy cerca ═══
+  // Excepción: se permite si las medias se están estrechando (viene de un lateral)
+  let noOp=null;
+  if(signal==="LONG"){
+    const priorHigh=Math.max(...hi.slice(-30,-3)),roomUp=((priorHigh-last)/last)*100;
+    const touches=hi.slice(-30).filter(h=>Math.abs(h-priorHigh)/priorHigh<0.006).length;
+    if(roomUp>0.05&&roomUp<1.5&&!emasNarrowing){signal=null;noOp="Zona no operable: resistencia/máximo a "+F(roomUp,1)+"%"+(touches>=3?" (triple techo)":touches>=2?" (doble techo)":"");}
+  }else if(signal==="SHORT"){
+    const priorLow=Math.min(...lo.slice(-30,-3)),roomDn=((last-priorLow)/last)*100;
+    const touches=lo.slice(-30).filter(l=>Math.abs(l-priorLow)/priorLow<0.006).length;
+    if(roomDn>0.05&&roomDn<1.5&&!emasNarrowing){signal=null;noOp="Zona no operable: soporte/mínimo a "+F(roomDn,1)+"%"+(touches>=3?" (triple suelo)":touches>=2?" (doble suelo)":"");}
+  }
+
   // ── BLOCK: Too far from EMA55 = NO ENTRY ──
   const tooFar=absDistE55>nearZone*2.5;
   const farMsg=`Precio ${distE55>0?"por encima":"por debajo"} de EMA55 (${F(absDistE55,1)}%). Esperar pullback.`;
 
-  return{signal:tooFar?null:signal,reason,quality,trend,distE55:F(distE55,2),absDistE55:F(absDistE55,2),nearZone:F(nearZone,2),tooFar,farMsg:tooFar?farMsg:null,rsi:lR,adx:lA,adxRising:(ax[n-1]>ax[n-3]),isSqz:iSq,sqzV:lS,macdH:lM,atr:lAt,e10,e55,sq,last,swL,swH,le55};
+  return{signal:tooFar?null:signal,reason,quality,trend,distE55:F(distE55,2),absDistE55:F(absDistE55,2),nearZone:F(nearZone,2),tooFar,farMsg:tooFar?farMsg:null,noOp,emasNarrowing,rsi:lR,adx:lA,adxRising:(ax[n-1]>ax[n-3]),isSqz:iSq,sqzV:lS,macdH:lM,atr:lAt,e10,e55,sq,last,swL,swH,le55};
 }
 
 // ═══ DAILY COMPASS ═══
