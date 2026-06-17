@@ -23,7 +23,7 @@ function _a(h,l,c,k=14){const n=c.length;let a=Array(n).fill(15);if(n<k*2+1)retu
 function _sq(c,h,l){const k=20,n=c.length;let v=[],s=[];for(let i=0;i<n;i++){if(i<k){v.push(0);s.push(false);continue;}const sl=c.slice(i-k,i),mn=sl.reduce((a,b)=>a+b,0)/k,st=Math.sqrt(sl.reduce((a,b)=>a+(b-mn)**2,0)/k);let at=0;for(let j=Math.max(1,i-k);j<=i;j++)at+=Math.max(h[j]-l[j],Math.abs(h[j]-c[j-1]),Math.abs(l[j]-c[j-1]));at/=k;s.push(mn-2*st>mn-1.5*at&&mn+2*st<mn+1.5*at);v.push(c[i]-mn);}return{v,s};}
 function _m(p){const a=_e(p,12),b=_e(p,26),m=a.map((v,i)=>v-b[i]),s=_e(m,9);return m.map((v,i)=>v-s[i]);}
 function _at(h,l,c,k=14){let a=[h[0]-l[0]];for(let i=1;i<c.length;i++){const t=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));a.push(i<k?t:(a[i-1]*(k-1)+t)/k);}return a;}
-function analyzeEntry(pr,hi,lo){
+function analyzeEntry(pr,hi,lo,vol){
   const n=pr.length;if(n<60)return null;
   const e10=_e(pr,10),e55=_e(pr,55),rs=_r(pr),ax=_a(hi,lo,pr),sq=_sq(pr,hi,lo),mh=_m(pr),at=_at(hi,lo,pr);
   const last=pr[n-1],prev=pr[n-2],prev2=pr[n-3];
@@ -51,6 +51,17 @@ function analyzeEntry(pr,hi,lo){
   const holdsLong=((Math.min(...lo.slice(-3))-le55)/le55)*100 > -nearZone && last>=Math.min(prev,prev2);
   // AGUANTE SHORT: llegó a la EMA55 y NO sube — máximos recientes no rompen la zona y no hace máximo nuevo
   const holdsShort=((Math.max(...hi.slice(-3))-le55)/le55)*100 < nearZone && last<=Math.max(prev,prev2);
+
+  // ═══ POC (perfil de volumen aprox): nivel de MAYOR volumen negociado = soporte/resistencia clave (filtro de Jaime) ═══
+  let poc=null;
+  if(vol&&vol.length===n){
+    const lb=Math.min(60,n),H=hi.slice(-lb),L=lo.slice(-lb),V=vol.slice(-lb);
+    const top=Math.max(...H),bot=Math.min(...L),bins=24,step=(top-bot)/bins;
+    if(step>0){const acc=new Array(bins).fill(0);
+      for(let i=0;i<lb;i++){const b0=Math.max(0,Math.floor((L[i]-bot)/step)),b1=Math.min(bins-1,Math.floor((H[i]-bot)/step)),sp=(b1-b0+1)||1;for(let b=b0;b<=b1;b++)acc[b]+=V[i]/sp;}
+      let mx=-1,mi=0;for(let b=0;b<bins;b++)if(acc[b]>mx){mx=acc[b];mi=b;}
+      poc=bot+(mi+0.5)*step;}
+  }
 
   let signal=null,reason=[],quality=0;
 
@@ -127,11 +138,17 @@ function analyzeEntry(pr,hi,lo){
     if(roomDn>0.05&&roomDn<1.5&&!emasNarrowing){signal=null;noOp="Zona no operable: soporte/mínimo a "+F(roomDn,1)+"%"+(touches>=3?" (triple suelo)":touches>=2?" (doble suelo)":"");}
   }
 
+  // POC como confluencia (Jaime: "el soporte por excelencia")
+  if(poc&&signal){const pd=((last-poc)/poc)*100;
+    if(signal==="LONG"&&pd>-0.4&&pd<2.5){reason.push("POC soporte ✓");quality=Math.min(9,quality+1);}
+    if(signal==="SHORT"&&pd<0.4&&pd>-2.5){reason.push("POC resistencia ✓");quality=Math.min(9,quality+1);}
+  }
+
   // ── BLOCK: Too far from EMA55 = NO ENTRY ──
   const tooFar=absDistE55>nearZone*2.5;
   const farMsg=`Precio ${distE55>0?"por encima":"por debajo"} de EMA55 (${F(absDistE55,1)}%). Esperar pullback.`;
 
-  return{signal:tooFar?null:signal,reason,quality,trend,distE55:F(distE55,2),absDistE55:F(absDistE55,2),nearZone:F(nearZone,2),tooFar,farMsg:tooFar?farMsg:null,noOp,emasNarrowing,rsi:lR,adx:lA,adxRising:(ax[n-1]>ax[n-3]),isSqz:iSq,sqzV:lS,macdH:lM,atr:lAt,e10,e55,sq,last,swL,swH,le55};
+  return{signal:tooFar?null:signal,reason,quality,trend,distE55:F(distE55,2),absDistE55:F(absDistE55,2),nearZone:F(nearZone,2),tooFar,farMsg:tooFar?farMsg:null,noOp,emasNarrowing,poc,rsi:lR,adx:lA,adxRising:(ax[n-1]>ax[n-3]),isSqz:iSq,sqzV:lS,macdH:lM,atr:lAt,e10,e55,sq,last,swL,swH,le55};
 }
 
 // ═══ DAILY COMPASS ═══
@@ -202,7 +219,7 @@ function detectSweepOB(kl,dir){
 function checkLayers(raw,pair,sym,btc){
   const tfs={};
   const ALL=["1m","5m","15m","1h","4h","1d"];
-  for(const tf of ALL){const d=raw[tf];if(!d||d.length<60)continue;tfs[tf]=analyzeEntry(d.map(k=>k.c),d.map(k=>k.h),d.map(k=>k.l));}
+  for(const tf of ALL){const d=raw[tf];if(!d||d.length<60)continue;tfs[tf]=analyzeEntry(d.map(k=>k.c),d.map(k=>k.h),d.map(k=>k.l),d.map(k=>k.v));}
 
   const comp=raw["1d"]?compass(raw["1d"]):null;
   const h4=tfs["4h"],h1=tfs["1h"],m15=tfs["15m"],m5=tfs["5m"],m1=tfs["1m"];
@@ -317,7 +334,7 @@ const HOSTS = ["https://data-api.binance.vision","https://api.binance.com"];
 async function fK(s,tf){
   for(const h of HOSTS){
     try{ const r=await fetch(`${h}/api/v3/klines?symbol=${s}&interval=${tf}&limit=100`);
-      if(r.ok) return (await r.json()).map(k=>({o:+k[1],h:+k[2],l:+k[3],c:+k[4]})); }catch{}
+      if(r.ok) return (await r.json()).map(k=>({o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})); }catch{}
   }
   return null;
 }
@@ -333,6 +350,37 @@ async function tg(text){
 const loadState = ()=>{ try{return JSON.parse(fs.readFileSync("state.json","utf8"));}catch{return {};} };
 const saveState = st=>{ try{fs.writeFileSync("state.json",JSON.stringify(st));}catch(e){console.log("state fail",e.message);} };
 
+// Migración: del formato viejo {SYM:hash} al nuevo {alerts, open, log}
+function migrateState(st){
+  if(st&&(st.alerts||st.open||st.log))return {alerts:st.alerts||{},open:st.open||{},log:st.log||[]};
+  return {alerts:(st&&typeof st==="object")?st:{},open:{},log:[]};
+}
+// Estadísticas del registro (solo operaciones cerradas)
+function stats(log){
+  const c=log.filter(t=>t.exit!=null),n=c.length;if(!n)return null;
+  const w=c.filter(t=>t.plPct>0),l=c.filter(t=>t.plPct<=0);
+  const avg=a=>a.length?a.reduce((s,t)=>s+t.plPct,0)/a.length:0;
+  return {n,wins:w.length,wr:Math.round(w.length/n*100),avgW:avg(w),avgL:avg(l),net:c.reduce((s,t)=>s+t.plPct,0)};
+}
+// Salida estilo Jaime: el target es el PATRÓN CONTRARIO (4H gira) o el stop / TP3
+function exitSignal(pos,res){
+  const h4=res.tfs?.["4h"];const px=h4?.last;if(px==null)return null;
+  if(pos.type==="LONG"){
+    if(px<=pos.sl)return{reason:"🛑 Stop alcanzado",px};
+    if(h4.signal==="SHORT"||h4.trend==="BAJ")return{reason:"🔄 Patrón contrario (4H giró bajista)",px};
+    if(px>=pos.tp3)return{reason:"🎯 TP3 alcanzado",px};
+  }else{
+    if(px>=pos.sl)return{reason:"🛑 Stop alcanzado",px};
+    if(h4.signal==="LONG"||h4.trend==="ALC")return{reason:"🔄 Patrón contrario (4H giró alcista)",px};
+    if(px<=pos.tp3)return{reason:"🎯 TP3 alcanzado",px};
+  }
+  return null;
+}
+function tgExit(pos,ex,s){
+  const pl=pos.type==="LONG"?((ex.px-pos.entry)/pos.entry*100):((pos.entry-ex.px)/pos.entry*100);
+  return `${pl>0?"✅":"❌"} <b>CERRAR ${pos.type} ${pos.pair}</b>\n${ex.reason}\n━━━━━━━━━━━━━━\n💰 Entrada: <code>${FP(pos.entry)}</code>\n🚪 Salida: <code>${FP(ex.px)}</code>\n📈 Resultado: <b>${pl>=0?"+":""}${F(pl,2)}%</b>${s?`\n\n📒 <b>Registro</b>: ${s.n} ops · acierto ${s.wr}% · neto ${s.net>=0?"+":""}${F(s.net,1)}%`:""}\n⏰ ${TD()}`;
+}
+
 async function main(){
   if(process.env.TEST==="true"){
     await tg("✅ <b>Robot CryptoScalper conectado</b>\n📡 Mensaje de prueba — si lees esto, Telegram funciona y te llegarán las señales.\n⏰ "+TD());
@@ -344,28 +392,50 @@ async function main(){
     await Promise.all(ALL.map(async tf=>{ const d=await fK(p.s,tf); if(d)raw[p.s][tf]=d; })); }));
   const btc = raw["BTCUSDT"] ? btcGuide(raw["BTCUSDT"]) : null;
   if(btc) console.log(`₿ BTC guía: ${btc.dir} · cayendo=${btc.dumping} · subiendo=${btc.pumping} · Δ1h=${F(btc.m15,2)}%`);
-  const st = loadState();
-  let nuevas=0, activas=0;
+  const st = migrateState(loadState());
+  let nuevas=0, cierres=0, activas=0;
   for(const p of PAIRS){
     const r=raw[p.s]; if(!r||!r["4h"]){ console.log(`· ${p.s}: sin datos`); continue; }
     const res=checkLayers(r,p.l,p.s,btc);
+    const open=st.open[p.s];
+
+    // ── SALIDA: si hay posición abierta, buscar patrón contrario / stop / TP3 ──
+    if(open){
+      const ex=exitSignal(open,res);
+      if(ex){
+        const pl=open.type==="LONG"?((ex.px-open.entry)/open.entry*100):((open.entry-ex.px)/open.entry*100);
+        st.log.push({pair:open.pair,type:open.type,entry:open.entry,exit:ex.px,plPct:+F(pl,3),reason:ex.reason,quality:open.quality,openTs:open.ts,closeTs:Date.now()});
+        if(st.log.length>120)st.log=st.log.slice(-120);
+        delete st.open[p.s]; delete st.alerts[p.s];
+        cierres++;
+        console.log(`📕 CIERRE: ${open.type} ${p.s} · ${F(pl,2)}% · ${ex.reason}`);
+        await tg(tgExit(open,ex,stats(st.log)));
+      } else {
+        activas++;
+        console.log(`↔︎ ${p.s}: ${open.type} abierta @ ${F(open.entry,4)} — sin patrón de salida`);
+      }
+      continue; // mientras la posición esté abierta no abrimos otra en este par
+    }
+
+    // ── ENTRADA: nueva señal ──
     if(res.signal){
-      activas++;
       const e=res.signal;
       const hash=e.type+e.pair+e.quality+F(e.entry,0);
-      if(st[p.s]!==hash){
-        st[p.s]=hash; nuevas++;
+      if(st.alerts[p.s]!==hash){
+        st.alerts[p.s]=hash; nuevas++; activas++;
+        st.open[p.s]={pair:e.pair,type:e.type,entry:e.entry,sl:e.sl,tp1:e.tp1,tp2:e.tp2,tp3:e.tp3,quality:e.quality,ts:Date.now()};
         console.log(`🎯 SEÑAL NUEVA: ${e.type} ${e.pair} · ${e.quality} @ ${F(e.entry,4)}`);
         await tg(tgFmt(e));
       } else {
         console.log(`= ${p.s}: señal ya avisada (${e.type} ${e.quality})`);
       }
     } else {
-      if(st[p.s]) delete st[p.s];   // se libera para volver a avisar cuando reaparezca
+      if(st.alerts[p.s]) delete st.alerts[p.s];
       console.log(`· ${p.s}: ${res.status||"sin señal"}`);
     }
   }
   saveState(st);
-  console.log(`✅ Fin. Señales activas: ${activas} · alertas nuevas enviadas: ${nuevas}`);
+  const s=stats(st.log);
+  console.log(`✅ Fin. activas:${activas} · nuevas:${nuevas} · cierres:${cierres}`+(s?` · registro: ${s.n} ops, acierto ${s.wr}%, neto ${F(s.net,1)}%`:""));
 }
 main();
