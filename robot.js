@@ -108,9 +108,9 @@ function analyzeEntry(pr,hi,lo,vol){
     }
   }
 
-  // ── PATTERN 3: EMA cross (trend change) ──
-  if(pe10<=pe55&&le10>le55&&lS>0){signal="LONG";reason=["Cruce EMA 10>55","Cambio de tendencia ↑"];quality=6;if(lA>20)reason.push("ADX confirma");}
-  if(pe10>=pe55&&le10<le55&&lS<0){signal="SHORT";reason=["Cruce EMA 10<55","Cambio de tendencia ↓"];quality=6;if(lA>20)reason.push("ADX confirma");}
+  // ── PATTERN 3: Cruce de EMAs — SOLO confluencia (no abre; Jaime entra en el pullback que aguanta, no en el cruce) ──
+  if(signal==="LONG"&&pe10<=pe55&&le10>le55){reason.push("Cruce EMA 10>55 confirma");quality=Math.min(9,quality+1);}
+  if(signal==="SHORT"&&pe10>=pe55&&le10<le55){reason.push("Cruce EMA 10<55 confirma");quality=Math.min(9,quality+1);}
 
   // ── PATTERN 4: Divergencia (Squeeze, método TradingLatino) SOLO como confluencia — NUNCA abre operación sola ──
   if(n>40&&absDistE55<nearZone*1.5&&signal){
@@ -119,10 +119,10 @@ function analyzeEntry(pr,hi,lo,vol){
     if(signal==="SHORT"){const sP=piv(sq.v,false);if(sP.length>=2){const b=sP[0],a=sP[1];if(sq.v[b]<sq.v[a]&&pr[b]>pr[a]){reason.push("Divergencia bajista (Squeeze"+(rs[b]<rs[a]?"+RSI":"")+")");quality=Math.min(8,quality+1);}}}
   }
 
-  // ── PATTERN 5: Squeeze fire after lateralization near EMA55 ──
+  // ── PATTERN 5: Squeeze breakout — SOLO confluencia (no abre operación solo) ──
   if(wSq&&!iSq&&absDistE55<nearZone*1.2){
-    if(lS>0&&!signal){signal="LONG";reason=["Squeeze breakout ↑","Lateralización + explosión"];quality=5;}
-    if(lS<0&&!signal){signal="SHORT";reason=["Squeeze breakout ↓","Lateralización + explosión"];quality=5;}
+    if(signal==="LONG"&&lS>0){reason.push("Squeeze breakout ↑");quality=Math.min(9,quality+1);}
+    if(signal==="SHORT"&&lS<0){reason.push("Squeeze breakout ↓");quality=Math.min(9,quality+1);}
   }
 
   // ═══ ZONAS NO OPERABLES (Jaime): máximo anterior / doble-triple techo / resistencia muy cerca ═══
