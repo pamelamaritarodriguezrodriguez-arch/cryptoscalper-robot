@@ -1,0 +1,50 @@
+name: CryptoScalper Robot
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # cada ~10 min (GitHub puede demorar algo, es normal)
+  workflow_dispatch:            # permite ejecutarlo a mano con un botón
+    inputs:
+      test:
+        description: "Enviar mensaje de prueba a Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write               # para guardar el estado y no repetir alertas
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Ejecutar robot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.CHAT_ID }}
+          SYMBOLS:   ${{ vars.SYMBOLS }}
+          # MODO PRECISIÓN por defecto: solo señales con confluencia casi total
+          # (pullback EMA55 4H + ADX≥23 subiendo + barrido/OB 5m + BTC a favor
+          #  + diario alineado + calidad ≥6/10 + R:R ≥1.2 + SL ≤3.5%).
+          # Si algún día quieres MÁS señales (menos fiables), define la
+          # variable de repositorio RELAX con valor "1".
+          RELAX:     ${{ vars.RELAX }}
+          TEST:      ${{ github.event.inputs.test }}
+        run: node robot.js
+      - name: Guardar estado
+        run: |
+          git config user.name  "scalper-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json
+          git commit -m "estado [skip ci]" || echo "sin cambios"
+          # Traer cambios remotos ANTES de empujar: evita perder el estado
+          # (posiciones abiertas, avisos de TP/SL) si el repo cambió entre escaneos
+          git pull --rebase origin ${GITHUB_REF_NAME} || true
+          git push || echo "::warning::⚠️ Push falló — el estado NO se guardó en este escaneo"

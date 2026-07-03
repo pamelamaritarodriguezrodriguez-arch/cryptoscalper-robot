@@ -14,7 +14,9 @@ const Pct = (a,b)=>b===0?0:((a-b)/b)*100;
 const T   = ()=>new Date().toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const TD  = ()=>new Date().toLocaleDateString("es",{day:"2-digit",month:"short"})+" "+T();
 const ALL = ["1m","5m","15m","1h","4h","1d"];
-const S   = { strict: process.env.STRICT === "1" };   // modo estricto vía variable
+const S   = { strict: process.env.STRICT === "1", relax: process.env.RELAX === "1" };
+// Por defecto el robot corre en MODO PRECISIÓN (todos los filtros obligatorios).
+// RELAX=1 vuelve al comportamiento antiguo (más señales, menos fiables).
 
 // ═══ INDICADORES (idénticos a la app) ═══
 function _e(p,k){if(!p.length)return[];const m=2/(k+1);let e=[p[0]];for(let i=1;i<p.length;i++)e.push(p[i]*m+e[i-1]*(1-m));return e;}
@@ -240,18 +242,26 @@ function checkLayers(raw,pair,sym,btc){
 
   // ═══ BARRIDO DE LIQUIDEZ + ORDER BLOCK (5m) ═══
   const sob=raw["5m"]?detectSweepOB(raw["5m"],dir):{sweep:false,ob:false};
-  // Modo estricto: exige barrido O order block para disparar la señal
-  if(typeof S!=="undefined"&&S.strict&&!(sob.sweep||sob.ob))
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ Esperando barrido/OB en 5m (modo estricto)",warnings:[]};
+  // MODO PRECISIÓN (por defecto): exige barrido O order block SIEMPRE. RELAX=1 lo desactiva.
+  if(!S.relax&&!(sob.sweep||sob.ob))
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ Esperando barrido/OB en 5m (precisión)",warnings:[]};
 
   // ═══ FILTRO ADX — fuerza de tendencia (estilo TradingLatino) ═══
   const ADX_MIN=23;
   if(h4.adx<ADX_MIN)
     return{signal:null,tfs,comp,btc,sob,status:"⏳ Tendencia débil · ADX 4H "+F(h4.adx,0)+" (mín "+ADX_MIN+")",warnings:[]};
-  // Modo estricto: el ADX 4H además debe ir SUBIENDO (la pendiente manda)
-  if(typeof S!=="undefined"&&S.strict&&!h4.adxRising)
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ ADX 4H sin fuerza creciente ("+F(h4.adx,0)+" ▼) — modo estricto",warnings:[]};
+  // MODO PRECISIÓN: el ADX 4H además debe ir SUBIENDO (la pendiente manda — TradingLatino)
+  if(!S.relax&&!h4.adxRising)
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ ADX 4H sin fuerza creciente ("+F(h4.adx,0)+" ▼)",warnings:[]};
   const adxStrong=h4.adx>=ADX_MIN&&h4.adxRising;
+
+  // MODO PRECISIÓN: BTC debe acompañar activamente (no basta con que no esté en contra)
+  if(!S.relax&&!isBTC&&btc&&btc.dir!==(dir==="LONG"?"ALC":"BAJ"))
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ BTC guía "+btc.dir+" — no acompaña el "+dir,warnings:[]};
+
+  // MODO PRECISIÓN: la tendencia DIARIA debe ir en la misma dirección (no operar contra el diario)
+  if(!S.relax&&comp&&((dir==="LONG"&&comp.trend!=="ALC")||(dir==="SHORT"&&comp.trend!=="BAJ")))
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ Diario "+(comp.trend==="ALC"?"ALCISTA":"BAJISTA")+" en contra del "+dir,warnings:[]};
 
   // At least 1 of (1H, 15m) must confirm same direction
   const h1ok=h1?.signal===dir;
@@ -283,12 +293,23 @@ function checkLayers(raw,pair,sym,btc){
   if(!isBTC&&btc&&btc.dir==="MIXTO")warnings.push("⚠️ BTC sin dirección clara — guía mixta");
   if(!h4.adxRising)warnings.push("⚠️ ADX 4H sin fuerza creciente ("+F(h4.adx,0)+")");
 
+  // MODO PRECISIÓN: solo avisar señales ÓPTIMAS (confluencia casi total)
+  if(!S.relax&&quality<6)
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ Confluencia insuficiente ("+quality+"/10) — se exige ≥6",warnings};
+
   // Build entry
   const bestTF=m5ok&&m5?"5m":m15ok&&m15?"15m":h1ok&&h1?"1h":"4h";
   const r=tfs[bestTF]||h4;
   const isL=dir==="LONG",ep=r.last;
-  const sl=isL?r.swL-r.atr*0.8:r.swH+r.atr*0.8;
+  // SL sobre ESTRUCTURA de 1H (mínimo): un stop de swing de 5m es demasiado apretado
+  // para una tesis de 4H y te saca en el ruido. Se usa el swing más protector.
+  const struct=tfs["1h"]||h4;
+  const sl=isL?Math.min(struct.swL,r.swL)-struct.atr*0.6:Math.max(struct.swH,r.swH)+struct.atr*0.6;
   const risk=Math.abs(ep-sl);
+  // Tope de riesgo: si el stop queda a más de 3.5% no es una entrada precisa — esperar mejor precio
+  const riskPct=ep>0?risk/ep*100:99;
+  if(riskPct>3.5)
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ SL a "+F(riskPct,1)+"% (>3.5%) — entrada lejos de la estructura",warnings};
   let tp1,tp2,tp3;
   if(comp){
     const cap=isL?comp.nRes:comp.nSup,room=Math.abs(cap-ep);
@@ -297,7 +318,7 @@ function checkLayers(raw,pair,sym,btc){
     tp3=isL?ep+Math.min(risk*3.5,room*0.95):ep-Math.min(risk*3.5,room*0.95);
   }else{tp1=isL?ep+risk*1.5:ep-risk*1.5;tp2=isL?ep+risk*2.5:ep-risk*2.5;tp3=isL?ep+risk*3.5:ep-risk*3.5;}
   const rr=risk>0?F(Math.abs(tp1-ep)/risk,1):"0";
-  if(risk<=0||parseFloat(rr)<0.8)return{signal:null,tfs,comp,status:"R:R insuficiente",warnings};
+  if(risk<=0||parseFloat(rr)<(S.relax?0.8:1.2))return{signal:null,tfs,comp,status:"R:R insuficiente (1:"+rr+", mín 1:1.2)",warnings};
 
   const confirms=[];
   confirms.push("4H: "+h4.reason.join(", "));
@@ -318,7 +339,7 @@ function checkLayers(raw,pair,sym,btc){
 }
 
 // ═══ BINANCE / TG / SOUND ═══
-function tgFmt(e){return`${e.type==="LONG"?"🟢 COMPRAR":"🔴 VENDER"}\n\n💎 <b>${e.pair}</b>\n🎯 Pullback a EMA55 · Dist: ${e.distE55}%\n📊 Calidad: ${e.quality}\n✅ ${e.confirms.join("\n✅ ")}\n${e.dailyTrend==="ALCISTA"?"📈":"📉"} Diario: ${e.dailyTrend} · Riesgo: ${e.dailyRisk}${e.btcDir?`\n₿ BTC guía: ${e.btcDir==="ALC"?"ALCISTA ✅":e.btcDir==="BAJ"?"BAJISTA ⚠️":"MIXTO"}`:""}${e.sweep||e.ob?`\n🎯 ${e.sweep&&e.ob?"Barrido + Order Block":e.sweep?"Barrido de liquidez":"Order Block"} en 5m`:""}\n━━━━━━━━━━━━━━\n💰 Entrada: <code>${FP(e.entry)}</code>\n🛑 SL: <code>${FP(e.sl)}</code>\n🎯 TP1: <code>${FP(e.tp1)}</code>\n🎯 TP2: <code>${FP(e.tp2)}</code>\n🎯 TP3: <code>${FP(e.tp3)}</code>\nR:R 1:${e.rr}${e.warnings.length?"\n\n"+e.warnings.join("\n"):""}\n⏰ ${TD()}`;}
+function tgFmt(e){const zl=e.entry-e.atr*0.25,zh=e.entry+e.atr*0.25;return`${e.type==="LONG"?"🟢 COMPRAR":"🔴 VENDER"}\n\n💎 <b>${e.pair}</b>\n🎯 Pullback a EMA55 · Dist: ${e.distE55}%\n📊 Calidad: ${e.quality}\n✅ ${e.confirms.join("\n✅ ")}\n${e.dailyTrend==="ALCISTA"?"📈":"📉"} Diario: ${e.dailyTrend} · Riesgo: ${e.dailyRisk}${e.btcDir?`\n₿ BTC guía: ${e.btcDir==="ALC"?"ALCISTA ✅":e.btcDir==="BAJ"?"BAJISTA ⚠️":"MIXTO"}`:""}${e.sweep||e.ob?`\n🎯 ${e.sweep&&e.ob?"Barrido + Order Block":e.sweep?"Barrido de liquidez":"Order Block"} en 5m`:""}\n━━━━━━━━━━━━━━\n💰 Entrada: <code>${FP(e.entry)}</code>\n📍 Zona válida: <code>${FP(zl)}</code> – <code>${FP(zh)}</code>\n⚠️ Si el precio ya salió de la zona, NO perseguir\n🛑 SL: <code>${FP(e.sl)}</code>\n🎯 TP1: <code>${FP(e.tp1)}</code> (parcial + SL a BE)\n🎯 TP2: <code>${FP(e.tp2)}</code> (parcial + SL a TP1)\n🎯 TP3: <code>${FP(e.tp3)}</code>\nR:R 1:${e.rr}${e.warnings.length?"\n\n"+e.warnings.join("\n"):""}\n⏰ ${TD()}`;}
 
 // ════════════════════════════════════════════════════════════
 //  PARTE SERVIDOR (Binance + Telegram + estado)
@@ -333,8 +354,14 @@ const PAIRS = (process.env.SYMBOLS||DEFAULT_SYMS).split(",").map(x=>x.trim()).fi
 const HOSTS = ["https://data-api.binance.vision","https://api.binance.com"];
 async function fK(s,tf){
   for(const h of HOSTS){
-    try{ const r=await fetch(`${h}/api/v3/klines?symbol=${s}&interval=${tf}&limit=100`);
-      if(r.ok) return (await r.json()).map(k=>({o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})); }catch{}
+    try{ const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),10000);
+      const r=await fetch(`${h}/api/v3/klines?symbol=${s}&interval=${tf}&limit=101`,{signal:ctl.signal});
+      clearTimeout(to);
+      if(r.ok){
+        const kl=(await r.json()).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+        kl.pop(); // ⚠️ CLAVE: descartar la vela ABIERTA. Solo velas CERRADAS → la señal no "repinta"
+        return kl;
+      } }catch{}
   }
   return null;
 }
@@ -352,8 +379,8 @@ const saveState = st=>{ try{fs.writeFileSync("state.json",JSON.stringify(st));}c
 
 // Migración: del formato viejo {SYM:hash} al nuevo {alerts, open, log}
 function migrateState(st){
-  if(st&&(st.alerts||st.open||st.log))return {alerts:st.alerts||{},open:st.open||{},log:st.log||[]};
-  return {alerts:(st&&typeof st==="object")?st:{},open:{},log:[]};
+  if(st&&(st.alerts||st.open||st.log))return {alerts:st.alerts||{},open:st.open||{},log:st.log||[],cool:st.cool||{}};
+  return {alerts:(st&&typeof st==="object")?st:{},open:{},log:[],cool:{}};
 }
 // Estadísticas del registro (solo operaciones cerradas)
 function stats(log){
@@ -362,18 +389,39 @@ function stats(log){
   const avg=a=>a.length?a.reduce((s,t)=>s+t.plPct,0)/a.length:0;
   return {n,wins:w.length,wr:Math.round(w.length/n*100),avgW:avg(w),avgL:avg(l),net:c.reduce((s,t)=>s+t.plPct,0)};
 }
+// Extremos intrabar (velas 5m CERRADAS) desde la apertura de la posición:
+// evita perder toques de SL/TP que ocurren ENTRE dos escaneos del robot.
+function extremesSince(raw,ts){
+  const m5=raw?.["5m"]||[];
+  const since=m5.filter(k=>k.t>=ts);
+  if(!since.length)return null;
+  return{hi:Math.max(...since.map(k=>k.h)),lo:Math.min(...since.map(k=>k.l))};
+}
 // Salida estilo Jaime: el target es el PATRÓN CONTRARIO (4H gira) o el stop / TP3
-function exitSignal(pos,res){
+function exitSignal(pos,res,raw){
   const h4=res.tfs?.["4h"];const px=h4?.last;if(px==null)return null;
+  const exTP=extremesSince(raw,pos.ts)||{hi:px,lo:px};              // TPs: desde la apertura
+  const exSL=extremesSince(raw,pos.slTs||pos.ts)||{hi:px,lo:px};    // SL: desde su ÚLTIMO ajuste (breakeven/TP1)
   if(pos.type==="LONG"){
-    if(px<=pos.sl)return{reason:"🛑 Stop alcanzado",px};
+    if(exSL.lo<=pos.sl||px<=pos.sl)return{reason:pos.be?"🛡️ Breakeven tocado (operación protegida)":"🛑 Stop alcanzado",px:Math.min(px,pos.sl)};
+    if(exTP.hi>=pos.tp3||px>=pos.tp3)return{reason:"🎯 TP3 alcanzado",px:Math.max(px,pos.tp3)};
     if(h4.signal==="SHORT"||h4.trend==="BAJ")return{reason:"🔄 Patrón contrario (4H giró bajista)",px};
-    if(px>=pos.tp3)return{reason:"🎯 TP3 alcanzado",px};
   }else{
-    if(px>=pos.sl)return{reason:"🛑 Stop alcanzado",px};
+    if(exSL.hi>=pos.sl||px>=pos.sl)return{reason:pos.be?"🛡️ Breakeven tocado (operación protegida)":"🛑 Stop alcanzado",px:Math.max(px,pos.sl)};
+    if(exTP.lo<=pos.tp3||px<=pos.tp3)return{reason:"🎯 TP3 alcanzado",px:Math.min(px,pos.tp3)};
     if(h4.signal==="LONG"||h4.trend==="ALC")return{reason:"🔄 Patrón contrario (4H giró alcista)",px};
-    if(px<=pos.tp3)return{reason:"🎯 TP3 alcanzado",px};
   }
+  return null;
+}
+// Gestión de TPs parciales: avisa TP1/TP2 una sola vez y mueve el SL a breakeven tras TP1
+function tpAlert(pos,raw){
+  const ex=extremesSince(raw,pos.ts);if(!ex)return null;
+  const isL=pos.type==="LONG";
+  const hit=t=>isL?ex.hi>=t:ex.lo<=t;
+  if(!pos.tp1Done&&hit(pos.tp1)){pos.tp1Done=1;pos.sl=pos.entry;pos.be=1;pos.slTs=Date.now();
+    return`🎯 <b>TP1 ${pos.pair}</b> (${pos.type})\n💰 Toma parcial en <code>${FP(pos.tp1)}</code>\n🛡️ SL movido a BREAKEVEN <code>${FP(pos.entry)}</code> — operación sin riesgo\n⏰ ${TD()}`;}
+  if(pos.tp1Done&&!pos.tp2Done&&hit(pos.tp2)){pos.tp2Done=1;pos.sl=isL?Math.max(pos.sl,pos.tp1):Math.min(pos.sl,pos.tp1);pos.slTs=Date.now();
+    return`🎯 <b>TP2 ${pos.pair}</b> (${pos.type})\n💰 Segunda parcial en <code>${FP(pos.tp2)}</code>\n🛡️ SL ajustado a TP1 <code>${FP(pos.sl)}</code>\n⏰ ${TD()}`;}
   return null;
 }
 function tgExit(pos,ex,s){
@@ -401,12 +449,16 @@ async function main(){
 
     // ── SALIDA: si hay posición abierta, buscar patrón contrario / stop / TP3 ──
     if(open){
-      const ex=exitSignal(open,res);
+      // Avisos de TP1/TP2 (parciales) + SL a breakeven — antes de evaluar la salida total
+      const tpMsg=tpAlert(open,r);
+      if(tpMsg){ console.log(`🎯 TP parcial: ${open.type} ${p.s}`); await tg(tpMsg); }
+      const ex=exitSignal(open,res,r);
       if(ex){
         const pl=open.type==="LONG"?((ex.px-open.entry)/open.entry*100):((open.entry-ex.px)/open.entry*100);
         st.log.push({pair:open.pair,type:open.type,entry:open.entry,exit:ex.px,plPct:+F(pl,3),reason:ex.reason,quality:open.quality,openTs:open.ts,closeTs:Date.now()});
         if(st.log.length>120)st.log=st.log.slice(-120);
         delete st.open[p.s]; delete st.alerts[p.s];
+        st.cool[p.s]=Date.now(); // enfriamiento: no reentrar de inmediato en el mismo par
         cierres++;
         console.log(`📕 CIERRE: ${open.type} ${p.s} · ${F(pl,2)}% · ${ex.reason}`);
         await tg(tgExit(open,ex,stats(st.log)));
@@ -418,9 +470,15 @@ async function main(){
     }
 
     // ── ENTRADA: nueva señal ──
+    // Enfriamiento: tras cerrar una operación en este par, esperar 1 vela de 4H (4h)
+    // antes de abrir otra — evita reentradas impulsivas en la misma zona.
+    if(res.signal&&st.cool[p.s]&&Date.now()-st.cool[p.s]<4*3600e3){
+      console.log(`· ${p.s}: señal ${res.signal.type} ignorada (enfriamiento post-cierre)`);
+      res.signal=null;
+    }
     if(res.signal){
       const e=res.signal;
-      const hash=e.type+e.pair+e.quality+F(e.entry,0);
+      const hash=e.type+e.pair+e.quality+FP(e.entry); // FP: F(entry,0) redondeaba a 0 en monedas baratas (DOGE/PEPE)
       if(st.alerts[p.s]!==hash){
         st.alerts[p.s]=hash; nuevas++; activas++;
         st.open[p.s]={pair:e.pair,type:e.type,entry:e.entry,sl:e.sl,tp1:e.tp1,tp2:e.tp2,tp3:e.tp3,quality:e.quality,ts:Date.now()};
