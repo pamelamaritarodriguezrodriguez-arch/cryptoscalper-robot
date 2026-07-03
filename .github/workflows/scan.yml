@@ -30,7 +30,12 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID:   ${{ secrets.CHAT_ID }}
           SYMBOLS:   ${{ vars.SYMBOLS }}
-          STRICT:    ${{ vars.STRICT }}
+          # MODO PRECISIÓN por defecto: solo señales con confluencia casi total
+          # (pullback EMA55 4H + ADX≥23 subiendo + barrido/OB 5m + BTC a favor
+          #  + diario alineado + calidad ≥6/10 + R:R ≥1.2 + SL ≤3.5%).
+          # Si algún día quieres MÁS señales (menos fiables), define la
+          # variable de repositorio RELAX con valor "1".
+          RELAX:     ${{ vars.RELAX }}
           TEST:      ${{ github.event.inputs.test }}
         run: node robot.js
       - name: Guardar estado
@@ -39,4 +44,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add state.json
           git commit -m "estado [skip ci]" || echo "sin cambios"
-          git push || echo "push omitido"
+          # Traer cambios remotos ANTES de empujar: evita perder el estado
+          # (posiciones abiertas, avisos de TP/SL) si el repo cambió entre escaneos
+          git pull --rebase origin ${GITHUB_REF_NAME} || true
+          git push || echo "::warning::⚠️ Push falló — el estado NO se guardó en este escaneo"
