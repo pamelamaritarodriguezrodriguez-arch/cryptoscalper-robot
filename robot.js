@@ -250,9 +250,12 @@ function checkLayers(raw,pair,sym,btc){
   const ADX_MIN=23;
   if(h4.adx<ADX_MIN)
     return{signal:null,tfs,comp,btc,sob,status:"⏳ Tendencia débil · ADX 4H "+F(h4.adx,0)+" (mín "+ADX_MIN+")",warnings:[]};
-  // MODO PRECISIÓN: el ADX 4H además debe ir SUBIENDO (la pendiente manda — TradingLatino)
-  if(!S.relax&&!h4.adxRising)
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ ADX 4H sin fuerza creciente ("+F(h4.adx,0)+" ▼)",warnings:[]};
+  // MODO PRECISIÓN — CORREGIDO: durante un pullback el ADX SIEMPRE decae (es la física
+  // del indicador), así que exigir "ADX subiendo" en la EMA55 era una contradicción que
+  // bloqueaba casi todas las entradas válidas. Regla correcta: se rechaza solo si el ADX
+  // viene cayendo Y la tendencia ya es débil (<28). Fuerte y decayendo = pullback normal.
+  if(!S.relax&&!h4.adxRising&&h4.adx<28)
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ ADX 4H débil y decayendo ("+F(h4.adx,0)+" ▼, mín 28 si cae)",warnings:[]};
   const adxStrong=h4.adx>=ADX_MIN&&h4.adxRising;
 
   // MODO PRECISIÓN: BTC debe acompañar activamente (no basta con que no esté en contra)
@@ -276,7 +279,7 @@ function checkLayers(raw,pair,sym,btc){
   // Refinement
   const m5ok=m5?.signal===dir||(m5?.trend==="ALC"&&dir==="LONG")||(m5?.trend==="BAJ"&&dir==="SHORT");
   const m1ok=m1?.signal===dir||(m1?.trend==="ALC"&&dir==="LONG")||(m1?.trend==="BAJ"&&dir==="SHORT");
-  const quality=((h1ok?2:h1trend?1:0)+(m15ok?2:m15trend?1:0)+(m5ok?1:0)+(m1ok?1:0))+((!isBTC&&btc&&((dir==="LONG"&&btc.dir==="ALC")||(dir==="SHORT"&&btc.dir==="BAJ")))?1:0)+(sob.sweep?1:0)+(sob.ob?1:0)+(adxStrong?1:0);
+  const quality=((h1ok?2:h1trend?1:0)+(m15ok?2:m15trend?1:0)+(m5ok?1:0)+(m1ok?1:0))+((isBTC||(btc&&((dir==="LONG"&&btc.dir==="ALC")||(dir==="SHORT"&&btc.dir==="BAJ"))))?1:0)+(sob.sweep?1:0)+(sob.ob?1:0)+(adxStrong?1:0); // isBTC: BTC siempre está alineado consigo mismo
   let qLabel=quality>=5?"ÓPTIMA":quality>=3?"BUENA":"ACEPTABLE";
   if(!h4.adxRising&&qLabel==="ÓPTIMA")qLabel="BUENA"; // ADX cayendo nunca es ÓPTIMA
 
@@ -313,12 +316,18 @@ function checkLayers(raw,pair,sym,btc){
   let tp1,tp2,tp3;
   if(comp){
     const cap=isL?comp.nRes:comp.nSup,room=Math.abs(cap-ep);
+    // MODO PRECISIÓN — CORREGIDO: antes se juzgaba el R:R contra el TP1 recortado por la
+    // resistencia (una toma PARCIAL), lo que rechazaba operaciones válidas. La regla
+    // correcta: el recorrido hasta la resistencia/soporte diario debe pagar ≥2× el riesgo.
+    if(!S.relax&&room<risk*2)
+      return{signal:null,tfs,comp,btc,sob,status:"⏳ "+(isL?"Resistencia":"Soporte")+" diario a "+F(room/ep*100,1)+"% — recorrido < 2× riesgo",warnings};
     tp1=isL?ep+Math.min(risk*1.5,room*0.5):ep-Math.min(risk*1.5,room*0.5);
     tp2=isL?ep+Math.min(risk*2.5,room*0.8):ep-Math.min(risk*2.5,room*0.8);
     tp3=isL?ep+Math.min(risk*3.5,room*0.95):ep-Math.min(risk*3.5,room*0.95);
   }else{tp1=isL?ep+risk*1.5:ep-risk*1.5;tp2=isL?ep+risk*2.5:ep-risk*2.5;tp3=isL?ep+risk*3.5:ep-risk*3.5;}
-  const rr=risk>0?F(Math.abs(tp1-ep)/risk,1):"0";
-  if(risk<=0||parseFloat(rr)<(S.relax?0.8:1.2))return{signal:null,tfs,comp,status:"R:R insuficiente (1:"+rr+", mín 1:1.2)",warnings};
+  // R:R medido contra TP2 (el objetivo real de la operación; TP1 es solo la parcial)
+  const rr=risk>0?F(Math.abs(tp2-ep)/risk,1):"0";
+  if(risk<=0||parseFloat(rr)<(S.relax?0.8:1.5))return{signal:null,tfs,comp,status:"R:R insuficiente (1:"+rr+" a TP2, mín 1:1.5)",warnings};
 
   const confirms=[];
   confirms.push("4H: "+h4.reason.join(", "));
@@ -379,8 +388,8 @@ const saveState = st=>{ try{fs.writeFileSync("state.json",JSON.stringify(st));}c
 
 // Migración: del formato viejo {SYM:hash} al nuevo {alerts, open, log}
 function migrateState(st){
-  if(st&&(st.alerts||st.open||st.log))return {alerts:st.alerts||{},open:st.open||{},log:st.log||[],cool:st.cool||{}};
-  return {alerts:(st&&typeof st==="object")?st:{},open:{},log:[],cool:{}};
+  if(st&&(st.alerts||st.open||st.log))return {alerts:st.alerts||{},open:st.open||{},log:st.log||[],cool:st.cool||{},hb:st.hb||0};
+  return {alerts:(st&&typeof st==="object")?st:{},open:{},log:[],cool:{},hb:0};
 }
 // Estadísticas del registro (solo operaciones cerradas)
 function stats(log){
@@ -442,10 +451,12 @@ async function main(){
   if(btc) console.log(`₿ BTC guía: ${btc.dir} · cayendo=${btc.dumping} · subiendo=${btc.pumping} · Δ1h=${F(btc.m15,2)}%`);
   const st = migrateState(loadState());
   let nuevas=0, cierres=0, activas=0;
+  const hb=[]; // latido diario: estado por par
   for(const p of PAIRS){
-    const r=raw[p.s]; if(!r||!r["4h"]){ console.log(`· ${p.s}: sin datos`); continue; }
+    const r=raw[p.s]; if(!r||!r["4h"]){ console.log(`· ${p.s}: sin datos`); hb.push(`${p.l}: sin datos ⚠️`); continue; }
     const res=checkLayers(r,p.l,p.s,btc);
     const open=st.open[p.s];
+    hb.push(`${p.l}: ${open?`${open.type} abierta @ ${FP(open.entry)}`:(res.signal?`SEÑAL ${res.signal.type}`:(res.status||"sin señal"))}`);
 
     // ── SALIDA: si hay posición abierta, buscar patrón contrario / stop / TP3 ──
     if(open){
@@ -491,6 +502,13 @@ async function main(){
       if(st.alerts[p.s]) delete st.alerts[p.s];
       console.log(`· ${p.s}: ${res.status||"sin señal"}`);
     }
+  }
+  // ── LATIDO DIARIO: un resumen al día para saber que el robot está VIVO y filtrando ──
+  if(!st.hb||Date.now()-st.hb>23.5*3600e3){
+    st.hb=Date.now();
+    const s0=stats(st.log);
+    await tg(`💓 <b>Robot activo</b> — resumen diario\n₿ BTC guía: ${btc?btc.dir:"?"}\n\n${hb.map(x=>"· "+x).join("\n")}\n${s0?`\n📒 Registro: ${s0.n} ops · acierto ${s0.wr}% · neto ${F(s0.net,1)}%`:""}\n\nℹ️ Sin señal = los filtros de precisión están descartando entradas de baja confluencia. Es lo esperado.\n⏰ ${TD()}`);
+    console.log("💓 Latido diario enviado.");
   }
   saveState(st);
   const s=stats(st.log);
