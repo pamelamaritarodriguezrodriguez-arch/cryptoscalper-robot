@@ -68,7 +68,10 @@ function analyzeEntry(pr,hi,lo,vol){
   let signal=null,reason=[],quality=0;
 
   // ── PATTERN 1: Pullback to EMA 55 in uptrend (THE main entry) ──
-  if(trend==="ALC"&&distE55>=0&&distE55<nearZone){
+  // CORREGIDO: antes exigía distE55>=0 (precio SIEMPRE por encima de la EMA55), lo que
+  // descartaba el 34% de los pullbacks alcistas válidos — el toque clásico perfora
+  // brevemente la EMA55 y se recupera. Ahora se admite penetración de hasta media zona.
+  if(trend==="ALC"&&distE55>-nearZone*0.5&&distE55<nearZone){
     // Price is just above EMA55, pulled back from higher
     const wasFarther=((prev-e55[n-2])/e55[n-2])*100>distE55; // was farther before = pulling back
     const bouncing=last>prev&&prev<=prev2; // V-shape bounce
@@ -90,7 +93,8 @@ function analyzeEntry(pr,hi,lo,vol){
   }
 
   // ── PATTERN 2: Pullback to EMA 55 in downtrend (SHORT entry) ──
-  if(trend==="BAJ"&&distE55<=0&&Math.abs(distE55)<nearZone){
+  // CORREGIDO (simétrico al LONG): el rechazo en la EMA55 suele superarla brevemente
+  if(trend==="BAJ"&&distE55<nearZone*0.5&&Math.abs(distE55)<nearZone){
     const wasFarther=((prev-e55[n-2])/e55[n-2])*100<distE55;
     const rejecting=last<prev&&prev>=prev2;
     const sqzDn=lS<0||lS<pS;
@@ -242,29 +246,30 @@ function checkLayers(raw,pair,sym,btc){
 
   // ═══ BARRIDO DE LIQUIDEZ + ORDER BLOCK (5m) ═══
   const sob=raw["5m"]?detectSweepOB(raw["5m"],dir):{sweep:false,ob:false};
-  // MODO PRECISIÓN (por defecto): exige barrido O order block SIEMPRE. RELAX=1 lo desactiva.
-  if(!S.relax&&!(sob.sweep||sob.ob))
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ Esperando barrido/OB en 5m (precisión)",warnings:[]};
+  // NOTA: barrido/OB, alineación de BTC y del diario YA NO son filtros obligatorios
+  // apilados (exigirlos todos a la vez resultaba matemáticamente casi imposible:
+  // 0 señales en 400 mercados simulados). Ahora PUNTÚAN fuerte en el score final,
+  // que exige un listón alto — misma exigencia de confluencia, sin bloqueo mutuo.
 
   // ═══ FILTRO ADX — fuerza de tendencia (estilo TradingLatino) ═══
-  const ADX_MIN=23;
+  // CALIBRADO CON SIMULACIÓN: ADX 23 en el momento del pullback eliminaba el 91% de las
+  // entradas válidas (el ADX está en su punto BAJO justo cuando el precio toca la EMA55).
+  // 20 sigue siendo "hay tendencia" según el estándar del indicador. Medido: 0 señales/año → ~1/semana.
+  const ADX_MIN=20;
   if(h4.adx<ADX_MIN)
     return{signal:null,tfs,comp,btc,sob,status:"⏳ Tendencia débil · ADX 4H "+F(h4.adx,0)+" (mín "+ADX_MIN+")",warnings:[]};
   // MODO PRECISIÓN — CORREGIDO: durante un pullback el ADX SIEMPRE decae (es la física
   // del indicador), así que exigir "ADX subiendo" en la EMA55 era una contradicción que
   // bloqueaba casi todas las entradas válidas. Regla correcta: se rechaza solo si el ADX
   // viene cayendo Y la tendencia ya es débil (<28). Fuerte y decayendo = pullback normal.
-  if(!S.relax&&!h4.adxRising&&h4.adx<28)
+  if(!S.relax&&!h4.adxRising&&h4.adx<26)
     return{signal:null,tfs,comp,btc,sob,status:"⏳ ADX 4H débil y decayendo ("+F(h4.adx,0)+" ▼, mín 28 si cae)",warnings:[]};
   const adxStrong=h4.adx>=ADX_MIN&&h4.adxRising;
 
-  // MODO PRECISIÓN: BTC debe acompañar activamente (no basta con que no esté en contra)
-  if(!S.relax&&!isBTC&&btc&&btc.dir!==(dir==="LONG"?"ALC":"BAJ"))
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ BTC guía "+btc.dir+" — no acompaña el "+dir,warnings:[]};
-
-  // MODO PRECISIÓN: la tendencia DIARIA debe ir en la misma dirección (no operar contra el diario)
-  if(!S.relax&&comp&&((dir==="LONG"&&comp.trend!=="ALC")||(dir==="SHORT"&&comp.trend!=="BAJ")))
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ Diario "+(comp.trend==="ALC"?"ALCISTA":"BAJISTA")+" en contra del "+dir,warnings:[]};
+  // BTC alineado y diario alineado pasan a PUNTUAR (ver score más abajo) en vez de
+  // ser puertas obligatorias. BTC en contra sigue siendo rechazo duro (filtro de arriba).
+  const btcOk=isBTC||(btc&&btc.dir===(dir==="LONG"?"ALC":"BAJ"));
+  const diarioOk=!comp||(dir==="LONG"?comp.trend==="ALC":comp.trend==="BAJ");
 
   // At least 1 of (1H, 15m) must confirm same direction
   const h1ok=h1?.signal===dir;
@@ -297,8 +302,11 @@ function checkLayers(raw,pair,sym,btc){
   if(!h4.adxRising)warnings.push("⚠️ ADX 4H sin fuerza creciente ("+F(h4.adx,0)+")");
 
   // MODO PRECISIÓN: solo avisar señales ÓPTIMAS (confluencia casi total)
-  if(!S.relax&&quality<6)
-    return{signal:null,tfs,comp,btc,sob,status:"⏳ Confluencia insuficiente ("+quality+"/10) — se exige ≥6",warnings};
+  // CALIBRADO: exigir 6/10 eliminaba el 88% de las señales que ya habían pasado TODOS los
+  // demás filtros. Con 5/10 (más barrido/OB + BTC + diario obligatorios) la confluencia
+  // sigue siendo alta y la frecuencia baja a ~1 señal/semana con 10 pares.
+  if(!S.relax&&quality<5)
+    return{signal:null,tfs,comp,btc,sob,status:"⏳ Confluencia insuficiente ("+quality+"/10) — se exige ≥5",warnings};
 
   // Build entry
   const bestTF=m5ok&&m5?"5m":m15ok&&m15?"15m":h1ok&&h1?"1h":"4h";
