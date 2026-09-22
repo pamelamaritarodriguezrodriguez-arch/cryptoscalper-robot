@@ -1,0 +1,28 @@
+name: Backtest
+
+on:
+  workflow_dispatch:            # solo se ejecuta a mano, con el botón "Run workflow"
+    inputs:
+      days:
+        description: "Días de historia a probar (14 a 365)"
+        default: "90"
+
+permissions:
+  contents: read                # solo lee: NO toca state.json ni tu robot
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Backtest con datos reales de Binance
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.CHAT_ID }}
+          SYMBOLS:   ${{ vars.SYMBOLS }}
+          DAYS:      ${{ github.event.inputs.days }}
+        run: node backtest.js
