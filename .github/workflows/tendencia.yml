@@ -1,0 +1,28 @@
+name: Backtest Tendencia
+
+on:
+  workflow_dispatch:            # solo manual, con el botón "Run workflow"
+    inputs:
+      years:
+        description: "Años de historia a probar (1 a 8)"
+        default: "4"
+
+permissions:
+  contents: read                # solo lee: no toca tu robot ni state.json
+
+jobs:
+  tendencia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Backtest de tendencia con datos reales
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.CHAT_ID }}
+          SYMBOLS:   ${{ vars.SYMBOLS }}
+          YEARS:     ${{ github.event.inputs.years }}
+        run: node tendencia.js
