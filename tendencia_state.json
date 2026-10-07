@@ -2,7 +2,7 @@
  "start": 1790127651082,
  "capital0": 800,
  "cash": 77.78322265974583,
- "eq": 792.8815618896501,
+ "eq": 778.0660912917363,
  "pos": {
   "APTUSDT": {
    "qty": 76.30615275499976,
@@ -77,15 +77,16 @@
  },
  "lastC": {
   "UNIUSDT": 9.242,
-  "APTUSDT": 0.8451,
-  "OPUSDT": 0.1386,
-  "LTCUSDT": 70.1,
-  "SEIUSDT": 0.074,
-  "SUIUSDT": 1.2138,
-  "NEARUSDT": 5.294,
-  "SOLUSDT": 120.78,
-  "LINKUSDT": 13.854,
-  "AAVEUSDT": 184.08
+  "APTUSDT": 0.826,
+  "OPUSDT": 0.1305,
+  "LTCUSDT": 68.99,
+  "SEIUSDT": 0.07198,
+  "SUIUSDT": 1.1781,
+  "NEARUSDT": 5.066,
+  "SOLUSDT": 120.71,
+  "LINKUSDT": 13.959,
+  "AAVEUSDT": 179.71,
+  "ADAUSDT": 0.2674
  },
  "log": [
   {
@@ -107,5 +108,5 @@
    "pnl": -8.136208314211522
   }
  ],
- "lastDay": 1791158400000
+ "lastDay": 1791244800000
 }
