@@ -2,7 +2,7 @@
  "start": 1790127651082,
  "capital0": 800,
  "cash": 492.80606091118835,
- "eq": 682.6066566936336,
+ "eq": 683.3827654800415,
  "pos": {
   "NEARUSDT": {
    "qty": 10.849735743096247,
@@ -40,14 +40,14 @@
   "LTCUSDT": 68.99,
   "SEIUSDT": 0.0689,
   "SUIUSDT": 1.1283,
-  "NEARUSDT": 4.933,
+  "NEARUSDT": 5.262,
   "SOLUSDT": 116.3,
   "LINKUSDT": 13.326,
-  "AAVEUSDT": 154.6,
+  "AAVEUSDT": 154.93,
   "ADAUSDT": 0.2555,
   "ATOMUSDT": 1.922,
-  "TIAUSDT": 0.6245,
-  "INJUSDT": 8.948
+  "TIAUSDT": 0.6002,
+  "INJUSDT": 8.62
  },
  "log": [
   {
@@ -177,5 +177,5 @@
    "pnl": -7.059163177787006
   }
  ],
- "lastDay": 1792454400000
+ "lastDay": 1792540800000
 }
